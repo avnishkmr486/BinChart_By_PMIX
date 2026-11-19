@@ -220,7 +220,7 @@ th{font-size:12.5px}
     </div>
     <div class="legend">
       <span><i class="sw" style="background:var(--guide)"></i>System projection (guide)</span>
-      <span><i class="sw" style="background:var(--prop)"></i>Proposed (last-weeks average)</span>
+      <span><i class="sw" style="background:var(--prop)"></i>Proposed projection</span>
       <span><i class="sw" style="background:var(--actual)"></i>Actual need from POS</span>
       <span><i class="sw" style="background:var(--short)"></i>Short (guide below actual)</span>
       <span><i class="sw" style="background:var(--over)"></i>Over (guide above actual)</span>
@@ -706,7 +706,7 @@ const PIECE_NOTE = 'Pieces — guide and POS share the same unit';
 const LS_KEY=STORE==='30'?'binsim-v2':'binsim-v2-'+STORE;
 let saved={}; try{ saved=JSON.parse(localStorage.getItem(LS_KEY)||'{}')||{}; }catch(e){ saved={}; }
 const S_DEF={view:'overview', date:'2026-10-05', station:'all', scope:'closed', gran:'native', buffer:0, lead:0, roundUp:false,
-  exInc:true, hideEmpty:true, from:null, to:null, bd:null, sort:'abs', sortDir:-1, mode:'slot', expanded:null, rq:'', rfilter:'food', src:'hybrid', sOpen:null, bq:'', pw:4, pview:'summary', pgran:'slot'};
+  exInc:true, hideEmpty:true, from:null, to:null, bd:null, sort:'abs', sortDir:-1, mode:'slot', expanded:null, rq:'', rfilter:'food', src:'hybrid', sOpen:null, bq:'', pw:4, pview:'summary', pgran:'slot', pm:'share'};
 const S = Object.assign({}, S_DEF, saved.ui||{});
 if((+saved.v||0)<5) S.scope='closed';  /* Orders defaults to Closed only; older saves may hold Closed + open */
 let recipes = JSON.parse(JSON.stringify(D.recipes));
@@ -1101,7 +1101,7 @@ function renderNotes(){
     <li><b>Bin_Management_Setup.xls</b> links each PDF friendly name to a Prep Item ID and description. All 30 friendly names match the PDFs. Menu_Items_Active.xlsx and Active_Menu_Item_recipe.xlsx join to the raw POS files on Menu Item ID (the raw product ID); units and unit costs come from the earlier MenuItemRecipe.csv by Prep Item ID, and recipe lines are matched to bin preps on Prep Item ID.</li>
     <li><b>Usage reports (direct + indirect).</b> All 30 bin preps now have a report (the file name is the Prep Item ID; Download__64_.xls is prep 13). Each lists every product and prep that contains the prep and the quantity per item, and replaces the earlier estimate on every tab, so the actual comes entirely from the reports with no simulator fill-in. Units follow the report: ounces for pintos, green beans, brown gravy, dirty rice, mashed potatoes, seasoned fries and cajun gravy; each for the rest. Products whose route is not in Active_Menu_Item_recipe.xlsx (mostly “No …” and “Sub …” modifiers, plus placeholder rows) are marked “Report only”: their report quantity is still used, including negative quantities for “No …” items. Bin units for ounce-based preps use the yield on the Recipes &amp; yields tab (ounces per guide unit), which is still a placeholder until you enter your batch sizes.</li>
     <li><b>Day-level PMIX file.</b> PMIX___Store_30___Oct_8__2026.xlsx (278 items, 634 closed orders, $7,748.90) is used as the source for Oct 8 on the PMIX tab. It matches the raw POS pages for that day exactly. It has no order times, so the time-slot comparison in Day detail still uses the raw pages.</li>
-    <li><b>Proposed projection.</b> For each Bin Chart item, slot and day, the proposed value is the average of the actual need in the same slot on the same weekday over the previous N weeks (default 4, 1–8). Only complete POS days count as history, so the first week of data (Oct 3–9) has none, and days with fewer than N earlier weeks use the ones available. “Slot error” is Σ|projection − actual| ÷ Σactual over every slot. The Per hour option adds the slots up into clock hours first (slots of an hour or longer are kept as they are) and reports “hourly error” the same way.</li>
+    <li><b>Proposed projection.</b> Two methods can be selected (the Method control on the Proposed projection tab and both reports). <b>Avg quantity × sales share</b> (default): the average daily quantity on the same weekday over the previous N weeks (default 4, 1–8), within the station’s hours, multiplied by the slot’s share of that day’s forecast sales (slot sales ÷ total sales from the system projection). <b>Same-slot average</b>: the average of the actual need in the same slot on the same weekday over the previous N weeks. Only complete POS days count as history, so the first week of data (Oct 3–9) has none, and days with fewer than N earlier weeks use the ones available. “Slot error” is Σ|projection − actual| ÷ Σactual over every slot. The Per hour option adds the slots up into clock hours first (slots of an hour or longer are kept as they are) and reports “hourly error” the same way.</li>
     <li>POS modifiers (Add Bacon, Extra Sausage, No Sausage and similar) are now counted, because the recipe file gives them quantities (negative for “No”).</li></ul></section>
   <section class="panel"><h3>How actual need is calculated</h3><ol>
     <li>Duplicated orders across pages are removed by order ID. Refunds and deleted or voided orders are dropped, and so are voided line items. “Closed only” keeps orders whose state is closed; “Closed + open” adds orders still open at export time.</li>
@@ -1545,14 +1545,19 @@ function histDates(date,W){ const o=[]; for(let k=1;k<=W;k++){ const h=addDays(d
 function pw(){ return Math.max(1,Math.min(8,Math.round(+S.pw||4))); }
 /* per-slot guide, actual and proposed for one bin item on one day */
 function projSlot(date,key,W){
-  const ck=['proj',date,key,W,S.scope,S.buffer,S.lead,S.roundUp,yields[key],recipeVer].join('|');
+  const ck=['proj',date,key,W,S.pm,S.scope,S.buffer,S.lead,S.roundUp,yields[key],recipeVer].join('|');
   if(cache.has(ck)) return cache.get(ck);
   const n=native(date,key), hist=histDates(date,W);
   let res={slots:n.slots, guide:n.guide, actual:n.actual, prop:null, weeks:[], hist:[], outside:n.outside};
   if(hist.length){
     const sum=new Array(n.slots.length).fill(0), weeks=[];
     hist.forEach(h=>{ const hn=native(h,key,true), v=regroup(hn.slots,hn.actual,n.slots); weeks.push(v); v.forEach((x,i)=>sum[i]+=x); });
-    res.prop=sum.map(x=>{ const a=x/hist.length; return S.roundUp?Math.ceil(a-1e-9):a; }); res.weeks=weeks; res.hist=hist;
+    res.weeks=weeks; res.hist=hist;
+    if(S.pm==='avg'){ res.prop=sum.map(x=>{ const a=x/hist.length; return S.roundUp?Math.ceil(a-1e-9):a; }); }
+    else { /* average daily quantity (same weekday, previous weeks, station hours) x the slot's share of the day's forecast sales */
+      const sales=D.guide[date][STATION_OF[key]].sales, pos=sales.map(v=>Math.max(0,v)), ts=pos.reduce((x,y)=>x+y,0), nn=n.slots.length;
+      const share=pos.map(v=>ts>0?v/ts:1/nn), tot=weeks.map(w=>w.reduce((x,y)=>x+y,0)), avgTot=tot.reduce((x,y)=>x+y,0)/tot.length;
+      res.prop=share.map(sh=>{ const a=avgTot*sh; return S.roundUp?Math.ceil(a-1e-9):a; }); res.share=share; res.sales=sales; res.avgTot=avgTot; res.tot=tot; }
   }
   cache.set(ck,res); return res;
 }
@@ -1564,9 +1569,15 @@ function pgrid(slots){
 function projGrid(r){
   const g=pgrid(r.slots); if(g===r.slots) return r;
   const rg=v=>regroup(r.slots,v,g);
-  return {slots:g, guide:rg(r.guide), actual:rg(r.actual), prop:rg(r.prop), weeks:r.weeks.map(rg), hist:r.hist, outside:r.outside};
+  return {slots:g, guide:rg(r.guide), actual:rg(r.actual), prop:rg(r.prop), weeks:r.weeks.map(rg), hist:r.hist, outside:r.outside, share:r.share?rg(r.share):null, sales:r.sales?rg(r.sales):null, avgTot:r.avgTot, tot:r.tot};
 }
 const GL=()=>S.pgran==='hour'?'hourly':'slot';
+const pmDesc=W=>S.pm==='avg'?`average of the last ${W} weeks, same weekday and slot`:`average daily quantity of the last ${W} same weekdays × the slot’s share of that day’s forecast sales`;
+const pmSel=()=>`<div class="ctl"><span>Method</span><select id="pmsel" title="How the proposed projection is calculated"><option value="share" ${S.pm!=='avg'?'selected':''}>Avg quantity × sales share</option><option value="avg" ${S.pm==='avg'?'selected':''}>Same-slot average</option></select></div>`;
+const wirePm=()=>{ const e=document.getElementById('pmsel'); if(e) e.onchange=()=>{ S.pm=e.value; render(); }; };
+const pmShareHead=x=>x.share?'<th>Slot sales</th><th>Share of day</th>':'';
+const pmShareCell=(x,i)=>x.share?`<td class="num">${fmt$(x.sales[i])}</td><td class="num">${(x.share[i]*100).toFixed(1)}%</td>`:'';
+const pmShareTot=x=>x.share?`<td class="num">${fmt$(x.sales.reduce((a,b)=>a+b,0))}</td><td class="num">100%</td>`:'';
 function projItem(key,dates,W){
   const o={key, days:0, G:0, A:0, P:0, eG:0, eP:0, nw:0, daily:[]};
   dates.forEach(d=>{ const r0=projSlot(d,key,W); if(!r0.prop) return; const r=projGrid(r0); let g=0,a=0,p=0,eg=0,ep=0;
@@ -1585,15 +1596,15 @@ function projVisible(){ return BINS.filter(b=>(S.station==='all'||b.station===S.
 function renderProj(){
   const W=pw(), view=S.pview==='day'?'day':'summary';
   let h=`<h2>Proposed projection — average of the last ${W} weeks</h2>
-  <p class="sub">For every Bin Chart item and every time slot, the proposed projection is the average of the actual need in the <b>same slot on the same weekday</b> over the previous ${W} weeks (weeks with no POS data, and partial POS days, are left out; days with fewer weeks use the ones available). It is compared with the system projection (the guide) and with what was actually needed. Settings in the top bar (orders, buffer, cook lead, rounding) apply to both the history and the actual. <b>Per hour</b> adds the slots up into clock hours before comparing (items already planned in 1-hour slots do not change).</p>
+  <p class="sub">For every Bin Chart item and every time slot, the proposed projection is ${S.pm==='avg'?`the average of the actual need in the <b>same slot on the same weekday</b> over the previous ${W} weeks`:`the <b>average daily quantity</b> on the same weekday over the previous ${W} weeks, multiplied by the <b>slot’s share of that day’s forecast sales</b> (slot sales ÷ total sales on the system projection)`} (weeks with no POS data, and partial POS days, are left out; days with fewer weeks use the ones available). It is compared with the system projection (the guide) and with what was actually needed. Settings in the top bar (orders, buffer, cook lead, rounding) apply to both the history and the actual. <b>Per hour</b> adds the slots up into clock hours before comparing (items already planned in 1-hour slots do not change).</p>
   <div class="chips" role="group" aria-label="View"><button data-pview="summary" aria-pressed="${view==='summary'}">Summary by item</button><button data-pview="day" aria-pressed="${view==='day'}">${S.pgran==='hour'?'Hourly':'Slot'} calculation for one day</button>
-   <span class="spacer"></span><div class="chips" role="group" aria-label="Granularity" style="margin:0"><button data-pgran="slot" aria-pressed="${S.pgran!=='hour'}">Per slot</button><button data-pgran="hour" aria-pressed="${S.pgran==='hour'}">Per hour</button></div><div class="ctl"><span>Weeks back</span><input type="number" id="pwk" min="1" max="8" step="1" value="${W}" style="width:60px"></div><div class="ctl">${binSearchHTML('pbq')}</div></div>`;
+   <span class="spacer"></span><div class="chips" role="group" aria-label="Granularity" style="margin:0"><button data-pgran="slot" aria-pressed="${S.pgran!=='hour'}">Per slot</button><button data-pgran="hour" aria-pressed="${S.pgran==='hour'}">Per hour</button></div>${pmSel()}<div class="ctl"><span>Weeks back</span><input type="number" id="pwk" min="1" max="8" step="1" value="${W}" style="width:60px"></div><div class="ctl">${binSearchHTML('pbq')}</div></div>`;
   h += view==='day' ? projDayHTML(W) : projSummaryHTML(W);
   app.innerHTML=h;
   app.querySelectorAll('[data-pview]').forEach(b=>b.onclick=()=>{ S.pview=b.dataset.pview; render(); });
   app.querySelectorAll('[data-pgran]').forEach(b=>b.onclick=()=>{ S.pgran=b.dataset.pgran; render(); });
   const pwk=document.getElementById('pwk'); pwk.onchange=()=>{ S.pw=Math.max(1,Math.min(8,Math.round(+pwk.value||4))); PJ.open=null; render(); };
-  wireBinSearch('pbq');
+  wireBinSearch('pbq'); wirePm();
   app.querySelectorAll('[data-psort]').forEach(t=>t.onclick=()=>{ const k=t.dataset.psort; if(PJ.sort===k) PJ.dir*=-1; else { PJ.sort=k; PJ.dir=(k==='name'||k==='st')?1:-1; } render(); });
   app.querySelectorAll('tr.row[data-popen]').forEach(t=>t.onclick=()=>{ PJ.open=PJ.open===t.dataset.popen?null:t.dataset.popen; render(); });
   app.querySelectorAll('[data-pgo]').forEach(a=>a.onclick=e=>{ e.preventDefault(); e.stopPropagation(); const [d,k]=a.dataset.pgo.split('|'); S.pview='day'; S.date=d; S.station=STATION_OF[k]; S.bq=BINS[BI[k]].label; render(); scrollTo(0,0); });
@@ -1677,10 +1688,10 @@ function projDayHTML(W){
         <div class="strip">${r.slots.map((s,i)=>{ const df=r.prop[i]-r.actual[i], pc=r.prop[i]>0?(r.actual[i]-r.prop[i])/r.prop[i]:(r.actual[i]>0?1:0);
           return `<div class="tk" data-tip="${esc(`${tlabel(s[0],1)} – ${tlabel(s[1],1)}: system ${fmtN(r.guide[i],1)}, proposed ${fmtN(r.prop[i],1)}, actual ${fmtN(r.actual[i],1)}`)}"><div class="t">${tlabel(s[0])}</div><div class="g">${fmtN(r.guide[i],r.guide[i]%1?1:0)}</div><div class="p">${fmtN(r.prop[i],r.prop[i]%1?1:0)}</div><div class="a">${fmtN(r.actual[i],(r.actual[i]%1&&r.actual[i]<20)?1:0)}</div><div class="d" style="background:${Math.abs(df)<0.05?'transparent':diffColor(pc)};color:${diffInk(pc)}">${Math.abs(df)<0.05?'0':fmtS(-df)}</div></div>`; }).join('')}</div>
         ${chartSVG({labels:labs, bars:[{n:'System',c:'var(--guide)',v:r.guide},{n:'Proposed',c:'var(--prop)',v:r.prop},{n:'Actual',c:'var(--actual)',v:r.actual}], h:150})}
-        <details class="bd"><summary>Show the calculation, ${gl==='hourly'?'hour by hour':'slot by slot'}</summary><div class="tbl-wrap"><table><thead><tr><th class="l">${gl==='hourly'?'Hour':'Slot'}</th><th>System</th>${r.hist.map(x=>`<th>${dlabel(x,1)}</th>`).join('')}<th>Average (proposed)</th><th>Actual</th><th>System − actual</th><th>Proposed − actual</th></tr></thead><tbody>
-        ${r.slots.map((s,i)=>`<tr><td class="l">${tlabel(s[0],1)} – ${tlabel(s[1],1)}</td><td class="num" style="color:var(--guide)">${fmtN(r.guide[i],r.guide[i]%1?1:0)}</td>${r.weeks.map(w=>`<td class="num">${fmtN(w[i],1)}</td>`).join('')}<td class="num" style="color:var(--prop)"><b>${fmtN(r.prop[i],1)}</b></td><td class="num" style="color:var(--actual)"><b>${fmtN(r.actual[i],1)}</b></td><td class="num">${fmtS(r.guide[i]-r.actual[i])}</td><td class="num">${fmtS(r.prop[i]-r.actual[i])}</td></tr>`).join('')}
-        <tr style="background:var(--surface2);font-weight:700"><td class="l">Total</td><td class="num">${fmtN(g,1)}</td>${r.weeks.map(w=>`<td class="num">${fmtN(w.reduce((x,y)=>x+y,0),1)}</td>`).join('')}<td class="num">${fmtN(p,1)}</td><td class="num">${fmtN(a,1)}</td><td class="num">${fmtS(g-a)}</td><td class="num">${fmtS(p-a)}</td></tr></tbody></table></div>
-        <p class="st" style="margin:4px 0 0">Average (proposed) = sum of the ${r.hist.length} week${r.hist.length>1?'s':''} ÷ ${r.hist.length}${S.roundUp?', rounded up per slot':''}. ${gl==='hourly'?'Each hour adds up the guide’s slots inside it.':'Slot windows are the same as the system guide for this station.'}</p></details></div>`;
+        <details class="bd"><summary>Show the calculation, ${gl==='hourly'?'hour by hour':'slot by slot'}</summary><div class="tbl-wrap"><table><thead><tr><th class="l">${gl==='hourly'?'Hour':'Slot'}</th><th>System</th>${r.hist.map(x=>`<th>${dlabel(x,1)}</th>`).join('')}${pmShareHead(r)}<th>${r.share?'Proposed':'Average (proposed)'}</th><th>Actual</th><th>System − actual</th><th>Proposed − actual</th></tr></thead><tbody>
+        ${r.slots.map((s,i)=>`<tr><td class="l">${tlabel(s[0],1)} – ${tlabel(s[1],1)}</td><td class="num" style="color:var(--guide)">${fmtN(r.guide[i],r.guide[i]%1?1:0)}</td>${r.weeks.map(w=>`<td class="num">${fmtN(w[i],1)}</td>`).join('')}${pmShareCell(r,i)}<td class="num" style="color:var(--prop)"><b>${fmtN(r.prop[i],1)}</b></td><td class="num" style="color:var(--actual)"><b>${fmtN(r.actual[i],1)}</b></td><td class="num">${fmtS(r.guide[i]-r.actual[i])}</td><td class="num">${fmtS(r.prop[i]-r.actual[i])}</td></tr>`).join('')}
+        <tr style="background:var(--surface2);font-weight:700"><td class="l">Total</td><td class="num">${fmtN(g,1)}</td>${r.weeks.map(w=>`<td class="num">${fmtN(w.reduce((x,y)=>x+y,0),1)}</td>`).join('')}${pmShareTot(r)}<td class="num">${fmtN(p,1)}</td><td class="num">${fmtN(a,1)}</td><td class="num">${fmtS(g-a)}</td><td class="num">${fmtS(p-a)}</td></tr></tbody></table></div>
+        <p class="st" style="margin:4px 0 0">${r.share?`Proposed = average daily quantity (${fmtN(r.avgTot,1)}, the mean of ${r.tot.map(t=>fmtN(t,1)).join(', ')}) × the slot’s share of the day’s forecast sales`:`Average (proposed) = sum of the ${r.hist.length} week${r.hist.length>1?'s':''} ÷ ${r.hist.length}`}${S.roundUp?', rounded up per slot':''}. ${gl==='hourly'?'Each hour adds up the guide’s slots inside it.':'Slot windows are the same as the system guide for this station.'}</p></details></div>`;
     });
     sh+=`</div>`; cards.push(sh);
   });
@@ -1712,13 +1723,13 @@ function repHeader(title,sub,W,withSearch){
   return `<div class="repbanner"><div><div class="rk">${esc(STORES[STORE])}</div><h2 style="margin:2px 0 4px">${esc(title)}</h2><div class="rs">${sub}</div></div>
     <div class="noprint repctl"><div class="chips" role="group" aria-label="Period" style="margin:0"><button data-rlast="7" aria-pressed="${on(7)}">Last 7 days</button><button data-rlast="14" aria-pressed="${on(14)}">Last 14 days</button></div>
     <div class="chips" role="group" aria-label="Granularity" style="margin:0"><button data-pgran="slot" aria-pressed="${S.pgran!=='hour'}">Per slot</button><button data-pgran="hour" aria-pressed="${S.pgran==='hour'}">Per hour</button></div>
-    <div class="ctl"><span>Weeks back</span><input type="number" id="rpw" min="1" max="8" value="${W}" style="width:56px"></div>${withSearch?`<div class="ctl">${binSearchHTML('rbq')}</div>`:''}</div></div>`;
+    ${pmSel()}<div class="ctl"><span>Weeks back</span><input type="number" id="rpw" min="1" max="8" value="${W}" style="width:56px"></div>${withSearch?`<div class="ctl">${binSearchHTML('rbq')}</div>`:''}</div></div>`;
 }
 function wireRepHeader(){
   app.querySelectorAll('[data-pgran]').forEach(b=>b.onclick=()=>{ S.pgran=b.dataset.pgran; render(); });
   app.querySelectorAll('[data-rlast]').forEach(b=>b.onclick=()=>{ const n=+b.dataset.rlast, L=D.dates, last=L[L.length-1], from=addDays(last,-(n-1)); S.to=last; S.from=L.find(x=>x>=from)||L[0]; render(); });
   const rpw=document.getElementById('rpw'); if(rpw) rpw.onchange=()=>{ S.pw=Math.max(1,Math.min(8,Math.round(+rpw.value||4))); render(); };
-  wireBinSearch('rbq');
+  wireBinSearch('rbq'); wirePm();
 }
 const gapPct=(x,ref)=>ref>0?(x-ref)/ref:null;
 
@@ -1727,7 +1738,7 @@ function renderRepSummary(){
   const W=pw(), gl=GL(), GLc=gl==='hourly'?'Hourly':'Slot', dates=datesInScope();
   let h=repHeader('Summary report — system vs proposed vs actual','',W,false);
   if(!dates.length){ app.innerHTML=h.replace('<div class="rs"></div>','')+`<section class="panel"><p class="sub" style="margin:0">No days in the selected range. Use Last 7 / Last 14 days, or widen the From/To dates.</p></section>`; wireRepHeader(); return; }
-  const bins=repBins();
+  const bins=BINS.filter(b=>S.station==='all'||b.station===S.station);
   const days=dates.map(d=>({d,G:0,A:0,P:null,eG:0,eP:0,cmp:false,gAll:0,aAll:0,fc:D.guide[d][SS.total].totalSales,as:salesActual(d).reduce((x,y)=>x+y,0)}));
   const items=new Map(bins.map(b=>[b.key,{b,G:0,P:0,A:0,eG:0,eP:0,days:0}]));
   dates.forEach((d,di)=>{ const day=days[di]; bins.forEach(b=>{ const x=itemDay(b.key,d,W); day.gAll+=x.G; day.aAll+=x.A;
@@ -1739,7 +1750,7 @@ function renderRepSummary(){
   list.forEach(r=>{ r.gain=(r.gErr!=null&&r.pErr!=null)?r.gErr-r.pErr:null; r.better=(r.eP<r.eG-1e-9)?'Proposed':(r.eG<r.eP-1e-9?'System':'Tie'); });
   if(!cmpDays.length){ app.innerHTML=h.replace('<div class="rs"></div>','')+`<section class="panel"><p class="sub" style="margin:0">None of these days has an earlier same-weekday day with POS data, so no proposed projection can be calculated. Choose a later period.</p></section>`; wireRepHeader(); return; }
   const rng=`${dlabel(dates[0],1)} – ${dlabel(dates[dates.length-1],1)}, 2026`;
-  const sub=`${rng} · ${dates.length} days (${cmpDays.length} compared)${rangeDates().length>dates.length?', '+(rangeDates().length-dates.length)+' partial POS day'+(rangeDates().length-dates.length>1?'s':'')+' skipped':''} · ${S.station==='all'?'all stations':esc(S.station)} · ${S.scope==='closed'?'closed orders':'closed + open orders'} · proposed = average of the last ${W} weeks, same weekday and slot`;
+  const sub=`${rng} · ${dates.length} days (${cmpDays.length} compared)${rangeDates().length>dates.length?', '+(rangeDates().length-dates.length)+' partial POS day'+(rangeDates().length-dates.length>1?'s':'')+' skipped':''} · ${S.station==='all'?'all stations':esc(S.station)} · ${S.scope==='closed'?'closed orders':'closed + open orders'} · proposed = ${pmDesc(W)}`;
   h=h.replace('<div class="rs"></div>',`<div class="rs">${sub}</div>`);
   const nP=list.filter(r=>r.better==='Proposed').length, nS=list.filter(r=>r.better==='System').length;
   const gB=gapPct(T.A,T.G), pB=gapPct(T.A,T.P), eGp=T.A?T.eG/T.A:null, ePp=T.A?T.eP/T.A:null;
@@ -1747,7 +1758,7 @@ function renderRepSummary(){
   const fcS=cmpDays.reduce((s,x)=>s+x.fc,0), asS=cmpDays.reduce((s,x)=>s+x.as,0);
   const ins=[
     `The system projection was <b>${pctTxt(Math.abs(gB))} ${gB>0?'below':'above'}</b> actual need across the period (${fmtN(T.G)} vs ${fmtN(T.A)} bin units); the proposed projection was within <b>${pctTxt(Math.abs(pB))}</b> (${fmtN(T.P)}).`,
-    `Measured ${gl==='hourly'?'per hour':'per slot'}, the miss falls from <b>${pctTxt(eGp)}</b> with the system projection to <b>${pctTxt(ePp)}</b> with the proposed one — ${Math.round((eGp-ePp)*100)} points ${eGp>=ePp?'better':'worse'}.`,
+    `Measured ${gl==='hourly'?'per hour':'per slot'}, the miss falls from <b>${pctTxt(eGp)}</b> with the system projection to <b>${pctTxt(ePp)}</b> with the proposed one — ${Math.round((eGp-ePp)*100)===0?'no change':Math.abs(Math.round((eGp-ePp)*100))+' points '+(eGp>ePp?'better':'worse')}.`,
     `The proposed projection is closer for <b>${nP} of ${nP+nS}</b> items${top.length?`; biggest gains: ${top.map(r=>esc(r.b.label)).join(', ')}`:''}.${worst.length?` Largest remaining misses: ${worst.map(r=>esc(r.b.label)+' ('+pctTxt(r.pErr)+')').join(', ')}.`:''}`,
     `Forecast sales were ${fmt$(fcS)} against ${fmt$(asS)} actual (${fmtP(gapPct(asS,fcS))}) on the compared days${days.length>cmpDays.length?`; ${days.length-cmpDays.length} early day${days.length-cmpDays.length>1?'s':''} without earlier same-weekday data are shown for system vs actual only`:''}.`];
   h+=`<section class="panel repinsights"><h3>Key takeaways</h3><ul>${ins.map(t=>`<li>${t}</li>`).join('')}</ul></section>
@@ -1783,7 +1794,7 @@ function renderRepSummary(){
     <td><span class="pill" style="background:${diffColor(r.gPct)};color:${diffInk(r.gPct)}">${r.G>0?fmtP(r.gPct):(r.A>0?'no guide':'—')}</span></td><td><span class="pill" style="background:${diffColor(r.pPct)};color:${diffInk(r.pPct)}">${r.P>0?fmtP(r.pPct):'—'}</span></td>
     <td class="num">${pctTxt(r.gErr)}</td><td class="num">${pctTxt(r.pErr)}</td><td class="num" style="color:${r.gain>0?'var(--actual)':r.gain<0?'var(--short)':'inherit'}">${r.gain==null?'—':(r.gain>0?'+':r.gain<0?'−':'')+Math.round(Math.abs(r.gain)*100)+' pts'}</td><td class="l">${projBadge(r.better)}</td></tr>`).join('')}</tbody></table></div></section>
    <div class="noprint repact"><button class="btn primary" id="repxlsx">Download Excel</button><button class="btn primary" id="reppdf">Download PDF</button><button class="btn" id="repcsv">Download CSV</button><button class="btn" id="repcopy">Copy tables</button><button class="btn" id="repprint">Print</button></div>`;
-  RPM.sum={store:STORES[STORE],title:'Summary report - system vs proposed vs actual',sub:plain(sub),ins:ins.map(plain),W,gl,from:dates[0],to:dates[dates.length-1],cmpDays:cmpDays.length,T,gB,pB,eGp,ePp,fcS,asS,
+  RPM.sum={pmd:pmDesc(W),store:STORES[STORE],title:'Summary report - system vs proposed vs actual',sub:plain(sub),ins:ins.map(plain),W,gl,from:dates[0],to:dates[dates.length-1],cmpDays:cmpDays.length,T,gB,pB,eGp,ePp,fcS,asS,
     kpis:[{label:'Actual need (bin units)',value:fmtN(T.A),color:'actual'},{label:'System projection - '+asc(fmtP(gB))+' gap to actual',value:fmtN(T.G),color:'guide'},{label:'Proposed projection - '+asc(fmtP(pB))+' gap to actual',value:fmtN(T.P),color:'prop'},{label:`System ${gl} error`,value:pctTxt(eGp),color:'guide'},{label:`Proposed ${gl} error`,value:pctTxt(ePp),color:'prop'},{label:'Items where proposed is closer',value:`${nP} of ${nP+nS}`}],
     days:days.map(x=>{ const g=x.cmp?x.G:x.gAll, a=x.cmp?x.A:x.aAll; return {label:dow(x.d)+' '+dlabel(x.d,1),fc:x.fc,as:x.as,g,P:x.P,a,gp:gapPct(a,g),pp:x.P==null?null:gapPct(a,x.P),ge:x.cmp&&x.A>0?x.eG/x.A:null,pe:x.cmp&&x.A>0?x.eP/x.A:null,better:!x.cmp?'-':(x.eP<x.eG-1e-9?'Proposed':x.eG<x.eP-1e-9?'System':'Tie')}; }),
     stations:sl.map(o=>({name:o.name,n:o.n,G:o.G,P:o.P,A:o.A,gp:gapPct(o.A,o.G),pp:gapPct(o.A,o.P),ge:o.A?o.eG/o.A:null,pe:o.A?o.eP/o.A:null,better:o.eP<o.eG-1e-9?'Proposed':o.eG<o.eP-1e-9?'System':'Tie'})),
@@ -1791,7 +1802,7 @@ function renderRepSummary(){
     chartLabels:lab,chartG:days.map(x=>x.cmp?x.G:x.gAll),chartP:days.map(x=>x.P==null?0:x.P),chartA:days.map(x=>x.cmp?x.A:x.aAll),errG:days.map(x=>x.cmp&&x.A>0?x.eG/x.A*100:0),errP:days.map(x=>x.cmp&&x.A>0?x.eP/x.A*100:0)};
   app.innerHTML=h; wireRepHeader();
   app.querySelectorAll('[data-rsort]').forEach(t=>t.onclick=()=>{ const k=t.dataset.rsort; if(RP.sort===k) RP.dir*=-1; else { RP.sort=k; RP.dir=k==='name'?1:-1; } render(); });
-  const csv=()=>csvRows([['Store',STORES[STORE]],['Period',rng],['Projection basis',`${W}-week same-weekday same-slot average; ${gl} error`],[],
+  const csv=()=>csvRows([['Store',STORES[STORE]],['Period',rng],['Projection basis',`${plain(pmDesc(W))}; ${gl} error`],[],
     ['Date','Weekday','Forecast sales','Actual sales','System','Proposed','Actual','System gap %','Proposed gap %','System error %','Proposed error %'],
     ...days.map(x=>{ const g=x.cmp?x.G:x.gAll,a=x.cmp?x.A:x.aAll; return [x.d,dow(x.d),x.fc.toFixed(2),x.as.toFixed(2),g.toFixed(1),x.P==null?'':x.P.toFixed(1),a.toFixed(1),gapPct(a,g)==null?'':(gapPct(a,g)*100).toFixed(1),x.P==null?'':(gapPct(a,x.P)*100).toFixed(1),x.cmp&&x.A>0?(x.eG/x.A*100).toFixed(1):'',x.cmp&&x.A>0?(x.eP/x.A*100).toFixed(1):'']; }),[],
     ['Item','Prep ID','Station','System','Proposed','Actual','System gap %','Proposed gap %','System error %','Proposed error %','Closer'],
@@ -1828,10 +1839,10 @@ function renderRepDetail(){
       <td class="num">${fmtS(r.gD)} <span class="st">${r.gPct==null?'':fmtP(r.gPct)}</span></td><td class="num">${r.pD==null?'—':fmtS(r.pD)+' <span class="st">'+(r.pPct==null?'':fmtP(r.pPct))+'</span>'}</td>
       <td class="num">${pctTxt(r.gErr)}</td><td class="num">${pctTxt(r.pErr)}</td><td class="l">${projBadge(r.better)}</td></tr>`;
     if(open){ const x=r.r;
-      h+=`<tr class="expand"><td colspan="11"><b>${esc(r.b.label)} — ${dlabel(r.d)}</b> <span class="st">· ${x.hist.length?'weeks used: '+x.hist.map(w=>dlabel(w,1)).join(', '):'no earlier same-weekday data'}</span>
+      h+=`<tr class="expand"><td colspan="11"><b>${esc(r.b.label)} — ${dlabel(r.d)}</b> <span class="st">· ${x.hist.length?'weeks used: '+x.hist.map(w=>dlabel(w,1)).join(', ')+(x.share?` · average daily quantity ${fmtN(x.avgTot,1)} × slot share of forecast sales`:''):'no earlier same-weekday data'}</span>
        ${chartSVG({labels:x.slots.map(s=>tlabel(s[0])), bars:[{n:'System',c:'var(--guide)',v:x.guide},...(x.prop?[{n:'Proposed',c:'var(--prop)',v:x.prop}]:[]),{n:'Actual',c:'var(--actual)',v:x.actual}], h:170})}
-       <div class="tbl-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th class="l">${gl==='hourly'?'Hour':'Slot'}</th><th>System</th>${x.hist.map(w=>`<th>${dlabel(w,1)}</th>`).join('')}<th>Proposed</th><th>Actual</th><th>System − actual</th><th>Proposed − actual</th></tr></thead><tbody>
-       ${x.slots.map((s,i)=>`<tr><td class="l">${tlabel(s[0],1)} – ${tlabel(s[1],1)}</td><td class="num" style="color:var(--guide)">${fmtN(x.guide[i],x.guide[i]%1?1:0)}</td>${x.weeks.map(w=>`<td class="num">${fmtN(w[i],1)}</td>`).join('')}<td class="num" style="color:var(--prop)">${x.prop?fmtN(x.prop[i],1):'—'}</td><td class="num" style="color:var(--actual)">${fmtN(x.actual[i],1)}</td><td class="num">${fmtS(x.guide[i]-x.actual[i])}</td><td class="num">${x.prop?fmtS(x.prop[i]-x.actual[i]):'—'}</td></tr>`).join('')}</tbody></table></div></td></tr>`; }
+       <div class="tbl-wrap" style="max-height:340px;overflow:auto"><table><thead><tr><th class="l">${gl==='hourly'?'Hour':'Slot'}</th><th>System</th>${x.hist.map(w=>`<th>${dlabel(w,1)}</th>`).join('')}${pmShareHead(x)}<th>Proposed</th><th>Actual</th><th>System − actual</th><th>Proposed − actual</th></tr></thead><tbody>
+       ${x.slots.map((s,i)=>`<tr><td class="l">${tlabel(s[0],1)} – ${tlabel(s[1],1)}</td><td class="num" style="color:var(--guide)">${fmtN(x.guide[i],x.guide[i]%1?1:0)}</td>${x.weeks.map(w=>`<td class="num">${fmtN(w[i],1)}</td>`).join('')}${pmShareCell(x,i)}<td class="num" style="color:var(--prop)">${x.prop?fmtN(x.prop[i],1):'—'}</td><td class="num" style="color:var(--actual)">${fmtN(x.actual[i],1)}</td><td class="num">${fmtS(x.guide[i]-x.actual[i])}</td><td class="num">${x.prop?fmtS(x.prop[i]-x.actual[i]):'—'}</td></tr>`).join('')}</tbody></table></div></td></tr>`; }
   });
   if(!vis.length) h+=`<tr><td colspan="11" class="l">No rows match.</td></tr>`;
   else h+=`<tr style="background:var(--surface2);font-weight:700"><td class="l" colspan="3">Total · rows with history</td><td class="num">${fmtN(T.G)}</td><td class="num">${fmtN(T.P)}</td><td class="num">${fmtN(T.A)}</td><td class="num">${fmtP(gapPct(T.A,T.G))}</td><td class="num">${fmtP(gapPct(T.A,T.P))}</td><td class="num">${T.A?pctTxt(T.eG/T.A):'—'}</td><td class="num">${T.A?pctTxt(T.eP/T.A):'—'}</td><td></td></tr>`;
@@ -1846,8 +1857,8 @@ function renderRepDetail(){
   const mo=document.getElementById('rmore'); if(mo) mo.onclick=()=>{ RP.limit+=150; render(); };
   const idCsv=()=>csvRows([['Store',STORES[STORE]],['Period',dates[0]+' to '+dates[dates.length-1]],[],['Date','Weekday','Item','Prep ID','Station','System','Proposed','Actual','System gap','Proposed gap','System gap %','Proposed gap %',`System ${gl} error %`,`Proposed ${gl} error %`,'Closer'],
     ...vis.map(r=>[r.d,dow(r.d),r.b.label,(SETUP_BY_KEY[r.b.key]||{}).id||'',r.b.station,r.G.toFixed(2),r.P==null?'':r.P.toFixed(2),r.A.toFixed(2),r.gD.toFixed(2),r.pD==null?'':r.pD.toFixed(2),r.gPct==null?'':(r.gPct*100).toFixed(1),r.pPct==null?'':(r.pPct*100).toFixed(1),r.gErr==null?'':(r.gErr*100).toFixed(1),r.pErr==null?'':(r.pErr*100).toFixed(1),r.better])]);
-  const slotCsv=()=>{ const L=[['Date','Weekday','Item','Prep ID','Station','Slot start','Slot end','System','Proposed','Actual','System − actual','Proposed − actual','Weeks used']];
-    vis.forEach(r=>{ const x=r.r; x.slots.forEach((s,i)=>L.push([r.d,dow(r.d),r.b.label,(SETUP_BY_KEY[r.b.key]||{}).id||'',r.b.station,tlabel(s[0],1),tlabel(s[1],1),x.guide[i].toFixed(2),x.prop?x.prop[i].toFixed(2):'',x.actual[i].toFixed(2),(x.guide[i]-x.actual[i]).toFixed(2),x.prop?(x.prop[i]-x.actual[i]).toFixed(2):'',x.hist.length])); });
+  const slotCsv=()=>{ const L=[['Date','Weekday','Item','Prep ID','Station','Slot start','Slot end','System','Proposed','Actual','System − actual','Proposed − actual','Weeks used','Slot sales','Share of day']];
+    vis.forEach(r=>{ const x=r.r; x.slots.forEach((s,i)=>L.push([r.d,dow(r.d),r.b.label,(SETUP_BY_KEY[r.b.key]||{}).id||'',r.b.station,tlabel(s[0],1),tlabel(s[1],1),x.guide[i].toFixed(2),x.prop?x.prop[i].toFixed(2):'',x.actual[i].toFixed(2),(x.guide[i]-x.actual[i]).toFixed(2),x.prop?(x.prop[i]-x.actual[i]).toFixed(2):'',x.hist.length,x.share?x.sales[i].toFixed(2):'',x.share?(x.share[i]*100).toFixed(2)+'%':''])); });
     return csvRows(L); };
   document.getElementById('rdcsv').onclick=()=>saveCsv(`detail-report-store-${STORE}-${dates[0]}_${dates[dates.length-1]}.csv`,idCsv());
   document.getElementById('rdslot').onclick=()=>saveCsv(`detail-report-slots-store-${STORE}-${dates[0]}_${dates[dates.length-1]}.csv`,slotCsv());
@@ -2024,7 +2035,7 @@ function pdfSummary(m){
   sumSpecs(m).forEach(sp=>{ if(y>doc.internal.pageSize.getHeight()-40){ doc.addPage(); y=16; }
     doc.setFont('helvetica','bold'); doc.setFontSize(10); doc.setTextColor(23,33,43); doc.text(asc(sp.title),10,y+2); y=pdfTable(doc,sp,y+4,{fs:sp.title==='By item'?6.8:7.2})+6; });
   doc.setFont('helvetica','normal'); doc.setFontSize(6.8); doc.setTextColor(90,103,116);
-  const note=doc.splitTextToSize('Gap = (actual - projection) / projection, so a positive value means the projection was too low. '+(m.gl==='hourly'?'Hourly':'Slot')+' error = sum of |projection - actual| / total actual. Proposed = average of the last '+m.W+' weeks, same weekday and slot.',W-20);
+  const note=doc.splitTextToSize('Gap = (actual - projection) / projection, so a positive value means the projection was too low. '+(m.gl==='hourly'?'Hourly':'Slot')+' error = sum of |projection - actual| / total actual. Proposed = '+asc(m.pmd)+'.',W-20);
   if(y>doc.internal.pageSize.getHeight()-22){ doc.addPage(); y=16; } doc.text(note,10,y);
   pdfFrame(doc,m.store,m.title); return doc;
 }
@@ -2036,8 +2047,8 @@ function detSpecs(m){
   return {item};
 }
 function slotSpec(x,gl,withTitle){
-  const cols=[{h:gl==='hourly'?'Hour':'Slot',type:'text',left:1,w:40},{h:'System',type:'dec1',color:'guide'},...x.hist.map(w=>({h:dlabel(w,1),type:'dec1'})),{h:'Proposed',type:'dec1',color:'prop'},{h:'Actual',type:'dec1',color:'actual'},{h:'System - actual',type:'sdec'},{h:'Proposed - actual',type:'sdec'}];
-  return {title:withTitle||null,cols,rows:x.slots.map((s,i)=>[tlabel(s[0],1)+' - '+tlabel(s[1],1),x.guide[i],...x.weeks.map(w=>w[i]),x.prop?x.prop[i]:null,x.actual[i],x.guide[i]-x.actual[i],x.prop?x.prop[i]-x.actual[i]:null])};
+  const cols=[{h:gl==='hourly'?'Hour':'Slot',type:'text',left:1,w:40},{h:'System',type:'dec1',color:'guide'},...x.hist.map(w=>({h:dlabel(w,1),type:'dec1'})),...(x.share?[{h:'Slot sales',type:'money'},{h:'Share of day',type:'pct'}]:[]),{h:'Proposed',type:'dec1',color:'prop'},{h:'Actual',type:'dec1',color:'actual'},{h:'System - actual',type:'sdec'},{h:'Proposed - actual',type:'sdec'}];
+  return {title:withTitle||null,cols,rows:x.slots.map((s,i)=>[tlabel(s[0],1)+' - '+tlabel(s[1],1),x.guide[i],...x.weeks.map(w=>w[i]),...(x.share?[x.sales[i],x.share[i]]:[]),x.prop?x.prop[i]:null,x.actual[i],x.guide[i]-x.actual[i],x.prop?x.prop[i]-x.actual[i]:null])};
 }
 function xlsxDetail(m){
   const rows=[], T=(v,st)=>({v,st});
@@ -2045,11 +2056,11 @@ function xlsxDetail(m){
   const sp=detSpecs(m).item; rows.push(...xlsxTable(sp));
   const hdrRow=5;
   const slotRows=[]; slotRows.push([T('Slot-level detail for every item-day in the Item-day sheet',{b:true,sz:12,color:COL.ink})]);
-  const hs=['Date','Weekday','Item','Prep ID','Station','Slot','System','Proposed','Actual','System - actual','Proposed - actual','Weeks used'];
+  const hs=['Date','Weekday','Item','Prep ID','Station','Slot','System','Proposed','Actual','System - actual','Proposed - actual','Weeks used','Slot sales','Share of day'];
   slotRows.push(hs.map((h,i)=>T(h,{b:true,color:'FFFFFF',fill:COL.ink,h:i<6?'left':'center',wrap:true})));
   m.rows.forEach(r=>{ const x=r.r; x.slots.forEach((s,i)=>{ const base={bd:true}, num=(v,c)=>T(typeof v==='number'?v:null,{bd:true,h:'right',nf:XFMT.dec1,color:c?COL[c]:undefined}), sg=v=>T(typeof v==='number'?v:null,{bd:true,h:'right',nf:XFMT.sdec});
-    slotRows.push([T(r.d,base),T(dow(r.d),base),T(r.item,base),T(r.prep,base),T(r.station,base),T(tlabel(s[0],1)+' - '+tlabel(s[1],1),base),num(x.guide[i],'guide'),num(x.prop?x.prop[i]:null,'prop'),num(x.actual[i],'actual'),sg(x.guide[i]-x.actual[i]),sg(x.prop?x.prop[i]-x.actual[i]:null),T(x.hist.length,{bd:true,h:'center'})]); }); });
-  return [{name:'Item-day',cols:[13,38,28,11,11,11,11,11,11,11,12,12,12],rows,freeze:{row:5}},{name:'Slots',cols:[11,8,36,8,28,22,10,10,10,12,12,8],rows:slotRows,freeze:{row:2}}];
+    slotRows.push([T(r.d,base),T(dow(r.d),base),T(r.item,base),T(r.prep,base),T(r.station,base),T(tlabel(s[0],1)+' - '+tlabel(s[1],1),base),num(x.guide[i],'guide'),num(x.prop?x.prop[i]:null,'prop'),num(x.actual[i],'actual'),sg(x.guide[i]-x.actual[i]),sg(x.prop?x.prop[i]-x.actual[i]:null),T(x.hist.length,{bd:true,h:'center'}),T(x.share?x.sales[i]:null,{bd:true,h:'right',nf:XFMT.money}),T(x.share?x.share[i]:null,{bd:true,h:'right',nf:XFMT.pct})]); }); });
+  return [{name:'Item-day',cols:[13,38,28,11,11,11,11,11,11,11,12,12,12],rows,freeze:{row:5}},{name:'Slots',cols:[11,8,36,8,28,22,10,10,10,12,12,8,11,11],rows:slotRows,freeze:{row:2}}];
 }
 function pdfDetail(m){
   const doc=newPdf(); if(!doc) return null; const W=doc.internal.pageSize.getWidth();
@@ -2083,7 +2094,7 @@ function copyText(s){ const done=()=>toast('Table copied — paste into a spread
 
 
 /* ================= Auto-save: browser + account, backup and restore ================= */
-const UI_KEYS=['view','date','station','scope','gran','buffer','lead','roundUp','exInc','hideEmpty','mode','src','sort','sortDir','expanded','sOpen','rq','rfilter','from','to','bq','pw','pview','pgran'];
+const UI_KEYS=['view','date','station','scope','gran','buffer','lead','roundUp','exInc','hideEmpty','mode','src','sort','sortDir','expanded','sOpen','rq','rfilter','from','to','bq','pw','pview','pgran','pm'];
 const MS_KEYS=['cst','mq','mfilter','msub','mOpen','cOpen','mLimit','cq','impf'];
 const PS_KEYS=['q','cat','sort','dir','comp','mod','group'];
 let lsOk=true, stamp=+saved.t||0, scrollY=+saved.scroll||0, bootDone=false, lastJson='', savedAt=null;
